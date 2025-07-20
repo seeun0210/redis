@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redis-cluster-init
+spec:
+  template:
+    spec:
+      serviceAccountName: default
+      volumes:
+        - name: shared-data
+          emptyDir: {}
+      containers:
+        - name: kubectl
+          image: bitnami/kubectl:latest
+          volumeMounts:
+            - name: shared-data
+              mountPath: /tmp
+          command:
+            - sh
+            - -c
+            - |
+              sleep 30
+              echo "Getting Redis cluster pod IPs..."
+              POD0_IP=$(kubectl get pod redis-cluster-0 -o jsonpath='{.status.podIP}')
+              POD1_IP=$(kubectl get pod redis-cluster-1 -o jsonpath='{.status.podIP}')
+              POD2_IP=$(kubectl get pod redis-cluster-2 -o jsonpath='{.status.podIP}')
+              POD3_IP=$(kubectl get pod redis-cluster-3 -o jsonpath='{.status.podIP}')
+              POD4_IP=$(kubectl get pod redis-cluster-4 -o jsonpath='{.status.podIP}')
+              POD5_IP=$(kubectl get pod redis-cluster-5 -o jsonpath='{.status.podIP}')
+
+              echo "Creating Redis cluster with IPs: $POD0_IP, $POD1_IP, $POD2_IP, $POD3_IP, $POD4_IP, $POD5_IP"
+              echo "$POD0_IP:6379 $POD1_IP:6379 $POD2_IP:6379 $POD3_IP:6379 $POD4_IP:6379 $POD5_IP:6379" > /tmp/redis-nodes.txt
+              echo "Redis cluster nodes saved to /tmp/redis-nodes.txt"
+        - name: redis-init
+          image: redis:6.2
+          volumeMounts:
+            - name: shared-data
+              mountPath: /tmp
+          command:
+            - sh
+            - -c
+            - |
+              sleep 35
+              echo "Reading Redis cluster nodes from file..."
+              NODES=$(cat /tmp/redis-nodes.txt)
+              echo "Creating Redis cluster with nodes: $NODES"
+              redis-cli --cluster create $NODES --cluster-replicas 1 --cluster-yes
+              echo "Redis cluster created successfully!"
+      restartPolicy: OnFailure
