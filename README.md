@@ -23,6 +23,7 @@ graph TB
 
         subgraph "Services"
             HS[redis-cluster-headless<br/>Headless Service]
+            NS[redis-cluster-service<br/>NodePort Service]
         end
 
         subgraph "Configuration"
@@ -45,6 +46,13 @@ graph TB
     HS --> S2
     HS --> S3
 
+    NS --> M1
+    NS --> M2
+    NS --> M3
+    NS --> S1
+    NS --> S2
+    NS --> S3
+
     CM --> M1
     CM --> M2
     CM --> M3
@@ -64,10 +72,11 @@ graph TB
 
 ```
 k8s/redis/
-├── configmap.yaml      # Redis 클러스터 설정
-├── service.yaml        # Headless 서비스
-├── statefulset.yaml    # Redis StatefulSet
-└── redis-cluster-init.yaml  # 클러스터 초기화 Job
+├── configmap.yaml              # Redis 클러스터 설정
+├── service.yaml                # Headless 서비스
+├── redis-cluster-service.yaml  # NodePort 서비스 (외부 접근용)
+├── statefulset.yaml            # Redis StatefulSet
+└── redis-cluster-init.yaml    # 클러스터 초기화 Job
 ```
 
 ## 🔧 구성 요소
@@ -123,7 +132,41 @@ spec:
 - `clusterIP: None`: Headless 서비스로 DNS 레코드 생성
 - 각 Pod에 대해 `pod-name.service-name.namespace.svc.cluster.local` 형태의 DNS 레코드 생성
 
-### 3. StatefulSet (`statefulset.yaml`)
+### 3. NodePort Service (`redis-cluster-service.yaml`)
+
+외부에서 Redis 클러스터에 접근하기 위한 NodePort 서비스를 정의합니다.
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cluster-service
+  namespace: default
+spec:
+  type: NodePort
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+      nodePort: 30637
+      protocol: TCP
+    - name: cluster
+      port: 16379
+      targetPort: 16379
+      nodePort: 31637
+      protocol: TCP
+  selector:
+    app: redis-cluster
+```
+
+**특징:**
+
+- `type: NodePort`: 외부에서 접근 가능한 서비스
+- `nodePort: 30637`: 외부 포트 (Redis)
+- `nodePort: 31637`: 외부 포트 (클러스터 버스)
+- **단일 IP 접근**: 모든 Redis 노드에 하나의 서비스 IP로 접근 가능
+
+### 4. StatefulSet (`statefulset.yaml`)
 
 Redis 클러스터 Pod들을 관리합니다.
 
@@ -178,7 +221,7 @@ spec:
 - **고정 네이밍**: `redis-cluster-0` ~ `redis-cluster-5`
 - **설정 마운트**: ConfigMap을 `/etc/redis`에 마운트
 
-### 4. Init Job (`redis-cluster-init.yaml`)
+### 5. Init Job (`redis-cluster-init.yaml`)
 
 Redis 클러스터를 초기화하는 Job입니다.
 
@@ -252,10 +295,21 @@ kubectl apply -f k8s/redis/
 # 또는 개별 배포
 kubectl apply -f k8s/redis/configmap.yaml
 kubectl apply -f k8s/redis/service.yaml
+kubectl apply -f k8s/redis/redis-cluster-service.yaml
 kubectl apply -f k8s/redis/statefulset.yaml
 ```
 
-### 2. Pod 상태 확인
+### 2. 서비스 확인
+
+```bash
+# 서비스 목록 확인
+kubectl get svc | grep redis-cluster
+
+# NodePort 서비스 IP 확인
+kubectl get svc redis-cluster-service -o wide
+```
+
+### 3. Pod 상태 확인
 
 ```bash
 # Pod 상태 확인
@@ -263,9 +317,6 @@ kubectl get pods | grep redis-cluster
 
 # StatefulSet 상태 확인
 kubectl get statefulset redis-cluster
-
-# 서비스 확인
-kubectl get svc | grep redis-cluster
 ```
 
 ### 3. 클러스터 초기화
@@ -290,6 +341,62 @@ kubectl exec redis-cluster-0 -- redis-cli cluster nodes
 # 클러스터 상태 체크
 kubectl exec redis-cluster-0 -- redis-cli --cluster check redis-cluster-0.redis-cluster-headless:6379
 ```
+
+## 🔌 NestJS 앱에서 Redis 클러스터 연결
+
+### 서비스를 통한 단일 접근
+
+Kubernetes 서비스를 사용하면 여러 Redis 노드에 개별적으로 접근할 필요 없이 하나의 서비스 IP로 접근할 수 있습니다.
+
+#### 1. 서비스 IP 확인
+
+```bash
+# 서비스 IP 확인
+kubectl get svc redis-cluster-service -o wide
+```
+
+#### 2. NestJS 앱 설정
+
+`src/app.module.ts`에서 Redis 클러스터 연결 설정:
+
+```typescript
+import { Module } from '@nestjs/common';
+import { RedisModule } from '@nestjs-modules/ioredis';
+
+@Module({
+  imports: [
+    RedisModule.forRoot({
+      type: 'cluster',
+      nodes: [
+        { host: '192.168.194.239', port: 6379 }, // 서비스 IP
+      ],
+      options: {
+        enableReadyCheck: false,
+        retryDelayOnFailover: 50,
+        enableOfflineQueue: true,
+        scaleReads: 'slave',
+        lazyConnect: true,
+      },
+    }),
+  ],
+  // ...
+})
+export class AppModule {}
+```
+
+#### 3. 연결 테스트
+
+```bash
+# NestJS 앱에서 Redis 연결 테스트
+curl http://localhost:3000/redis/cluster/info
+```
+
+**장점:**
+
+- **단순화된 연결**: 6개 IP 대신 1개 서비스 IP만 사용
+- **로드 밸런싱**: Kubernetes가 자동으로 트래픽 분산
+- **고가용성**: 노드 장애 시 자동으로 다른 노드로 라우팅
+- **관리 편의성**: IP 변경 시 서비스만 업데이트하면 됨
 
 ## 🔍 모니터링 및 관리
 

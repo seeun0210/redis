@@ -10,14 +10,7 @@ describe('AppService', () => {
       imports: [
         RedisModule.forRoot({
           type: 'cluster',
-          nodes: [
-            { host: 'redis-cluster-0.redis-cluster-headless', port: 6379 },
-            { host: 'redis-cluster-1.redis-cluster-headless', port: 6379 },
-            { host: 'redis-cluster-2.redis-cluster-headless', port: 6379 },
-            { host: 'redis-cluster-3.redis-cluster-headless', port: 6379 },
-            { host: 'redis-cluster-4.redis-cluster-headless', port: 6379 },
-            { host: 'redis-cluster-5.redis-cluster-headless', port: 6379 },
-          ],
+          nodes: [{ host: '192.168.194.239', port: 6379 }],
           options: {
             enableReadyCheck: false,
             retryDelayOnFailover: 100,
