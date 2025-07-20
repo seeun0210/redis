@@ -1,10 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { RedisModule } from '@nestjs-modules/ioredis';
 
-describe('AppController', () => {
-  let appController: AppController;
+describe('AppService', () => {
   let appService: AppService;
 
   beforeEach(async () => {
@@ -29,17 +27,17 @@ describe('AppController', () => {
           },
         }),
       ],
-      controllers: [AppController],
       providers: [AppService],
     }).compile();
 
-    appController = app.get<AppController>(AppController);
     appService = app.get<AppService>(AppService);
   });
 
-  describe('root', () => {
+  // Redis 연결은 테스트 모듈이 자동으로 정리합니다
+
+  describe('getHello', () => {
     it('should return "Hello World!"', () => {
-      expect(appController.getHello()).toBe('Hello World!');
+      expect(appService.getHello()).toBe('Hello World!');
     });
   });
 
